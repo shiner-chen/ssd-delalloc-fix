@@ -24,19 +24,20 @@
 
 ### 解决方案概述
 
-本项目提供 **两个内核补丁**：
+本项目提供 **一个综合内核补丁**，同时解决两个问题：
 
-**补丁 1: 修复 delalloc 和 journal data 模式冲突**
-- 基于上游 commit 3d2b158 (Lukas Czerner)
-- 添加 `ext4_inode_journal_mode()` 函数
-- 确保 delalloc 启用时禁用 journal data 模式
-- 防止 BUG_ON 崩溃
+**补丁内容：**
+1. **修复 delalloc 和 journal data 模式冲突**
+   - 基于上游 commit 3d2b158 (Lukas Czerner)
+   - 添加 `ext4_inode_journal_mode()` 函数
+   - 确保 delalloc 启用时禁用 journal data 模式
+   - 防止 BUG_ON 崩溃
 
-**补丁 2: 限制 writeback 批次大小**  
-- 限制每次 writeback 为 1024 页 (4MB)
-- 减少 i_mutex 锁持有时间
-- 防止系统 hang
-- 移植自 Linux 3.x 内核优化
+2. **限制 writeback 批次大小**  
+   - 限制每次 writeback 为 1024 页 (4MB)
+   - 减少 i_mutex 锁持有时间
+   - 防止系统 hang
+   - 移植自 Linux 3.x 内核优化
 
 该方案在保留 delalloc 特性（保护 SSD 寿命）的同时，完全解决了这两个问题。
 
@@ -131,11 +132,8 @@ sudo ./scripts/install.sh
 ```bash
 cd /usr/src/linux-2.6.39
 
-# 应用补丁 1: 修复 delalloc/journal data 冲突
+# 应用补丁：同时修复 delalloc/journal data 冲突和限制 writeback 批次大小
 patch -p1 < /path/to/patches/0001-ext4-Fix-delalloc-and-journal-data-mode-conflicts.patch
-
-# 应用补丁 2: 限制 writeback 批次大小  
-patch -p1 < /path/to/patches/0002-ext4-Limit-writeback-batch-size-to-1024-pages-for-SS.patch
 ```
 
 **步骤 2: 编译 ext4 模块**
@@ -267,7 +265,9 @@ stress-ng --iomix 5 --timeout 120s
 
 ## 技术细节
 
-### 补丁 1: 修复 delalloc 和 journal data 冲突
+### 补丁详解
+
+本补丁同时解决两个问题，修改两个文件：
 
 #### 修改文件
 
@@ -284,11 +284,13 @@ stress-ng --iomix 5 --timeout 120s
 - 添加显式清除 `EXT4_INODE_JOURNAL_DATA` 标志的逻辑
 - 重构 `ext4_set_aops()` 使用 journal mode 函数
 - 添加非常规文件的 `!S_ISREG()` 检查
+- 在 `ext4_da_writepages()` 中限制 writeback 批次大小为 1024 页
 
 #### 关键代码
 
+**1. Journal mode 检测函数（ext4_jbd2.h）**
+
 ```c
-// ext4_jbd2.h - 新增的 journal mode 检测函数
 static inline int ext4_inode_journal_mode(struct inode *inode)
 {
     if (EXT4_JOURNAL(inode) == NULL)
@@ -302,8 +304,11 @@ static inline int ext4_inode_journal_mode(struct inode *inode)
         return EXT4_INODE_JOURNAL_DATA_MODE;
     ...
 }
+```
 
-// inode.c - 冲突处理
+**2. 冲突处理（inode.c - ext4_da_write_end）**
+
+```c
 if (unlikely(ext4_test_inode_flag(inode, EXT4_INODE_JOURNAL_DATA))) {
     if (test_opt(inode->i_sb, DELALLOC)) {
         ext4_clear_inode_flag(inode, EXT4_INODE_JOURNAL_DATA);
@@ -311,17 +316,7 @@ if (unlikely(ext4_test_inode_flag(inode, EXT4_INODE_JOURNAL_DATA))) {
 }
 ```
 
-### 补丁 2: 限制 writeback 批次大小
-
-#### 修改文件
-
-**fs/ext4/inode.c** - `ext4_da_writepages()` 函数
-
-#### 修改位置
-
-第 3000 行附近，在调用 `write_cache_pages_da()` 之前
-
-#### 关键代码
+**3. Writeback 批次限制（inode.c - ext4_da_writepages）**
 
 ```c
 /* Limit writeback batch size (3.x kernel optimization for SSD) */
