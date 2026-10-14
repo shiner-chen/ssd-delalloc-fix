@@ -1,0 +1,10 @@
+# /etc/fstab example with commit=1 option
+#
+# Before optimization:
+# UUID=xxx-xxx-xxx  /  ext4  defaults  1 1
+#
+# After optimization:
+UUID=xxx-xxx-xxx  /  ext4  defaults,commit=1  1 1
+#
+# Note: Replace UUID=xxx-xxx-xxx with your actual root partition UUID
+# You can find it with: blkid | grep sda3

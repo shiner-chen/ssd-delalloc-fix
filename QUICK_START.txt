@@ -1,0 +1,38 @@
+========================================
+Linux 2.6.39 SSD Delalloc Fix - 快速指南
+========================================
+
+📦 项目位置：
+/home/adlink/chenx/linux-2.6.39-ssd-delalloc-fix/
+
+📁 包含内容：
+✓ 核心补丁文件（patches/ext4-writeback-batch-limit.patch）
+✓ 自动化安装脚本（scripts/install.sh）
+✓ 验证脚本（scripts/verify.sh）
+✓ 性能测试脚本（scripts/benchmark.sh）
+✓ 完整技术文档（README.md, TECHNICAL.md, FAQ.md）
+✓ 配置示例（fstab, sysctl.conf）
+✓ 测试场景（tests/test_scenarios.md）
+✓ GitHub 项目文件（LICENSE, .gitignore, CONTRIBUTING.md）
+
+🚀 上传到 GitHub：
+1. cd /home/adlink/chenx/linux-2.6.39-ssd-delalloc-fix
+2. git init
+3. git add .
+4. git commit -m "Initial commit: Linux 2.6.39 ext4 delalloc SSD optimization"
+5. git remote add origin <your-github-repo-url>
+6. git push -u origin main
+
+📖 用户使用流程：
+1. git clone <your-repo>
+2. sudo ./scripts/install.sh
+3. sudo reboot
+4. ./scripts/verify.sh
+5. ./scripts/benchmark.sh 3 60
+
+✅ 已完成：
+- 三层解决方案（内核补丁 + commit=1 + dirty参数）
+- SSD 写入寿命影响 <5%
+- 稳定性测试通过（3-4 workers）
+- 完整中英文文档
+

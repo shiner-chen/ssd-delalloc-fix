@@ -1,0 +1,163 @@
+From bca26cea5495cc8b032386fa66281b0caefb29de Mon Sep 17 00:00:00 2001
+From: "Linux 2.6.39 Maintainer" <noreply@example.com>
+Date: Wed, 14 Oct 2026 15:49:44 +0800
+Subject: [PATCH 1/2] ext4: Fix delalloc and journal data mode conflicts
+
+This commit addresses the fundamental incompatibility between ext4's
+delayed allocation (delalloc) and journal data mode that causes BUG_ON
+panics and system hangs.
+
+Changes to ext4_jbd2.h:
+- Add ext4_inode_journal_mode() function to centralize journal mode detection
+- Modify ext4_should_journal_data() to check DELALLOC flag
+- Add mode constants: EXT4_INODE_JOURNAL_DATA_MODE,
+  EXT4_INODE_ORDERED_DATA_MODE, EXT4_INODE_WRITEBACK_DATA_MODE
+- Ensure journal data mode is disabled when delalloc is enabled
+
+Changes to inode.c:
+- Update ext4_da_write_end() to use switch statement with journal modes
+- Add explicit clearing of EXT4_INODE_JOURNAL_DATA flag when delalloc enabled
+- Add EXT4_INODE_JOURNAL_DATA_MODE case to handle journalled_write_end
+- Refactor ext4_set_aops() to use ext4_inode_journal_mode()
+- Add !S_ISREG check for non-regular files
+
+This prevents the BUG_ON() panic that occurs when both delalloc and
+journal data flags are set (e.g., via chattr +j on delalloc filesystem).
+
+Based on upstream commit 3d2b158262826e8b75bbbfb7b97010838dd92ac7
+Adapted for Linux 2.6.39 kernel specifics
+
+Tested-on: Linux 2.6.39 with ext4 on SSD storage
+---
+ fs/ext4/ext4_jbd2.h | 31 ++++++++++++++++++++++---
+ fs/ext4/inode.c     | 55 +++++++++++++++++++++++++++++++++------------
+ 2 files changed, 69 insertions(+), 17 deletions(-)
+
+diff --git a/fs/ext4/ext4_jbd2.h b/fs/ext4/ext4_jbd2.h
+index d0f5353..0af7670 100644
+--- a/fs/ext4/ext4_jbd2.h
++++ b/fs/ext4/ext4_jbd2.h
+@@ -271,14 +271,39 @@ static inline int ext4_should_journal_data(struct inode *inode)
+ 	if (EXT4_JOURNAL(inode) == NULL)
+ 		return 0;
+ 	if (!S_ISREG(inode->i_mode))
++		return !test_opt(inode->i_sb, DELALLOC);
++	if (test_opt(inode->i_sb, DATA_FLAGS) == EXT4_MOUNT_JOURNAL_DATA &&
++	    !test_opt(inode->i_sb, DELALLOC))
+ 		return 1;
+-	if (test_opt(inode->i_sb, DATA_FLAGS) == EXT4_MOUNT_JOURNAL_DATA)
+-		return 1;
+-	if (ext4_test_inode_flag(inode, EXT4_INODE_JOURNAL_DATA))
++	if (ext4_test_inode_flag(inode, EXT4_INODE_JOURNAL_DATA) &&
++	    !test_opt(inode->i_sb, DELALLOC))
+ 		return 1;
+ 	return 0;
+ }
+ 
++#define EXT4_INODE_JOURNAL_DATA_MODE	0x01 /* journal data mode */
++#define EXT4_INODE_ORDERED_DATA_MODE	0x02 /* ordered data mode */
++#define EXT4_INODE_WRITEBACK_DATA_MODE	0x04 /* writeback data mode */
++
++static inline int ext4_inode_journal_mode(struct inode *inode)
++{
++	if (EXT4_JOURNAL(inode) == NULL)
++		return EXT4_INODE_WRITEBACK_DATA_MODE;	/* writeback */
++	/* We do not support data journalling with delayed allocation */
++	if ((!S_ISREG(inode->i_mode) && !test_opt(inode->i_sb, DELALLOC)) ||
++	    test_opt(inode->i_sb, DATA_FLAGS) == EXT4_MOUNT_JOURNAL_DATA)
++		return EXT4_INODE_JOURNAL_DATA_MODE;	/* journal data */
++	if (ext4_test_inode_flag(inode, EXT4_INODE_JOURNAL_DATA) &&
++	    !test_opt(inode->i_sb, DELALLOC))
++		return EXT4_INODE_JOURNAL_DATA_MODE;	/* journal data */
++	if (test_opt(inode->i_sb, DATA_FLAGS) == EXT4_MOUNT_ORDERED_DATA)
++		return EXT4_INODE_ORDERED_DATA_MODE;	/* ordered */
++	if (test_opt(inode->i_sb, DATA_FLAGS) == EXT4_MOUNT_WRITEBACK_DATA)
++		return EXT4_INODE_WRITEBACK_DATA_MODE;	/* writeback */
++	else
++		return EXT4_INODE_ORDERED_DATA_MODE;	/* ordered */
++}
++
+ static inline int ext4_should_order_data(struct inode *inode)
+ {
+ 	if (EXT4_JOURNAL(inode) == NULL)
+diff --git a/fs/ext4/inode.c b/fs/ext4/inode.c
+index f2fa5e8..4a903ae 100644
+--- a/fs/ext4/inode.c
++++ b/fs/ext4/inode.c
+@@ -3199,13 +3199,28 @@ static int ext4_da_write_end(struct file *file,
+ 	int write_mode = (int)(unsigned long)fsdata;
+ 
+ 	if (write_mode == FALL_BACK_TO_NONDELALLOC) {
+-		if (ext4_should_order_data(inode)) {
++		/*
++		 * Clear EXT4_INODE_JOURNAL_DATA flag if delalloc is enabled.
++		 * This resolves the conflict that causes both kernel panic and hung tasks.
++		 * The inode flag may have been set by chattr +j or inherited, but
++		 * journal data mode is fundamentally incompatible with delayed allocation.
++		 */
++		if (unlikely(ext4_test_inode_flag(inode, EXT4_INODE_JOURNAL_DATA))) {
++			if (test_opt(inode->i_sb, DELALLOC)) {
++				ext4_clear_inode_flag(inode, EXT4_INODE_JOURNAL_DATA);
++			}
++		}
++		switch (ext4_inode_journal_mode(inode)) {
++		case EXT4_INODE_ORDERED_DATA_MODE:
+ 			return ext4_ordered_write_end(file, mapping, pos,
+ 					len, copied, page, fsdata);
+-		} else if (ext4_should_writeback_data(inode)) {
++		case EXT4_INODE_WRITEBACK_DATA_MODE:
+ 			return ext4_writeback_write_end(file, mapping, pos,
+ 					len, copied, page, fsdata);
+-		} else {
++		case EXT4_INODE_JOURNAL_DATA_MODE:
++			return ext4_journalled_write_end(file, mapping, pos,
++					len, copied, page, fsdata);
++		default:
+ 			BUG();
+ 		}
+ 	}
+@@ -3893,18 +3908,30 @@ static const struct address_space_operations ext4_da_aops = {
+ 
+ void ext4_set_aops(struct inode *inode)
+ {
+-	if (ext4_should_order_data(inode) &&
+-		test_opt(inode->i_sb, DELALLOC))
+-		inode->i_mapping->a_ops = &ext4_da_aops;
+-	else if (ext4_should_order_data(inode))
+-		inode->i_mapping->a_ops = &ext4_ordered_aops;
+-	else if (ext4_should_writeback_data(inode) &&
+-		 test_opt(inode->i_sb, DELALLOC))
+-		inode->i_mapping->a_ops = &ext4_da_aops;
+-	else if (ext4_should_writeback_data(inode))
+-		inode->i_mapping->a_ops = &ext4_writeback_aops;
+-	else
++	/* Non-regular files always use journalled aops */
++	if (!S_ISREG(inode->i_mode)) {
+ 		inode->i_mapping->a_ops = &ext4_journalled_aops;
++		return;
++	}
++	switch (ext4_inode_journal_mode(inode)) {
++	case EXT4_INODE_ORDERED_DATA_MODE:
++		if (test_opt(inode->i_sb, DELALLOC))
++			inode->i_mapping->a_ops = &ext4_da_aops;
++		else
++			inode->i_mapping->a_ops = &ext4_ordered_aops;
++		break;
++	case EXT4_INODE_WRITEBACK_DATA_MODE:
++		if (test_opt(inode->i_sb, DELALLOC))
++			inode->i_mapping->a_ops = &ext4_da_aops;
++		else
++			inode->i_mapping->a_ops = &ext4_writeback_aops;
++		break;
++	case EXT4_INODE_JOURNAL_DATA_MODE:
++		inode->i_mapping->a_ops = &ext4_journalled_aops;
++		break;
++	default:
++		BUG();
++	}
+ }
+ 
+ /*
+-- 
+2.43.0
+

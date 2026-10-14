@@ -1,0 +1,23 @@
+# Backup files
+*.orig
+*.bak
+*.swp
+*~
+
+# Compiled files
+*.o
+*.ko
+*.mod.c
+*.symvers
+*.order
+
+# Build artifacts
+modules.builtin
+Module.markers
+
+# Temporary files
+/tmp/
+*.tmp
+
+# kernel-src git repository (managed separately)
+kernel-src/.git/
