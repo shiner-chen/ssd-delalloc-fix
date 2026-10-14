@@ -40,10 +40,10 @@ MODULE_PATH="/lib/modules/${KERNEL_VERSION}/kernel/fs/ext4/ext4.ko"
 
 echo "安装 ext4 delalloc SSD fix 模块..."
 
-# 备份原模块（只备份一次）
-if [ -f "$MODULE_PATH" ] && [ ! -f "${MODULE_PATH}.orig" ]; then
-    echo "备份原始模块: ${MODULE_PATH}.orig"
-    cp "$MODULE_PATH" "${MODULE_PATH}.orig"
+# 备份原模块（使用特定名称）
+if [ -f "$MODULE_PATH" ] && [ ! -f "${MODULE_PATH}.before-ssd-delalloc-fix" ]; then
+    echo "备份原始模块: ${MODULE_PATH}.before-ssd-delalloc-fix"
+    cp "$MODULE_PATH" "${MODULE_PATH}.before-ssd-delalloc-fix"
 fi
 
 # 安装新模块
@@ -53,9 +53,9 @@ cp /usr/share/ext4-delalloc-ssd-fix/ext4.ko "$MODULE_PATH"
 # 更新 initramfs
 echo "更新 initramfs..."
 INITRAMFS="/boot/initramfs-${KERNEL_VERSION}.img"
-if [ -f "$INITRAMFS" ] && [ ! -f "${INITRAMFS}.orig" ]; then
-    echo "备份原始 initramfs: ${INITRAMFS}.orig"
-    cp "$INITRAMFS" "${INITRAMFS}.orig"
+if [ -f "$INITRAMFS" ] && [ ! -f "${INITRAMFS}.before-ssd-delalloc-fix" ]; then
+    echo "备份原始 initramfs: ${INITRAMFS}.before-ssd-delalloc-fix"
+    cp "$INITRAMFS" "${INITRAMFS}.before-ssd-delalloc-fix"
 fi
 
 dracut -f "$INITRAMFS" "$KERNEL_VERSION"
@@ -81,9 +81,9 @@ fi
 
 # 配置 fstab (添加 commit=1)
 FSTAB="/etc/fstab"
-if [ -f "$FSTAB" ] && [ ! -f "${FSTAB}.orig" ]; then
-    echo "备份 fstab: ${FSTAB}.orig"
-    cp "$FSTAB" "${FSTAB}.orig"
+if [ -f "$FSTAB" ] && [ ! -f "${FSTAB}.before-ssd-delalloc-fix" ]; then
+    echo "备份 fstab: ${FSTAB}.before-ssd-delalloc-fix"
+    cp "$FSTAB" "${FSTAB}.before-ssd-delalloc-fix"
 fi
 
 echo "检查 fstab 中的 ext4 挂载选项..."
@@ -108,33 +108,33 @@ MODULE_PATH="/lib/modules/${KERNEL_VERSION}/kernel/fs/ext4/ext4.ko"
 echo "卸载 ext4 delalloc SSD fix 模块..."
 
 # 1. 恢复原模块
-if [ -f "${MODULE_PATH}.orig" ]; then
+if [ -f "${MODULE_PATH}.before-ssd-delalloc-fix" ]; then
     echo "恢复原始模块..."
-    cp "${MODULE_PATH}.orig" "$MODULE_PATH"
-    rm -f "${MODULE_PATH}.orig"
+    cp "${MODULE_PATH}.before-ssd-delalloc-fix" "$MODULE_PATH"
+    rm -f "${MODULE_PATH}.before-ssd-delalloc-fix"
 
     # 更新 initramfs
     INITRAMFS="/boot/initramfs-${KERNEL_VERSION}.img"
-    if [ -f "${INITRAMFS}.orig" ]; then
+    if [ -f "${INITRAMFS}.before-ssd-delalloc-fix" ]; then
         echo "恢复原始 initramfs..."
-        cp "${INITRAMFS}.orig" "$INITRAMFS"
-        rm -f "${INITRAMFS}.orig"
+        cp "${INITRAMFS}.before-ssd-delalloc-fix" "$INITRAMFS"
+        rm -f "${INITRAMFS}.before-ssd-delalloc-fix"
     else
         echo "重新生成 initramfs..."
         dracut -f "$INITRAMFS" "$KERNEL_VERSION"
     fi
 else
-    echo "警告: 未找到原始模块备份"
+    echo "警告: 未找到原始模块备份 (${MODULE_PATH}.before-ssd-delalloc-fix)"
 fi
 
 # 2. 恢复 fstab
 FSTAB="/etc/fstab"
-if [ -f "${FSTAB}.orig" ]; then
+if [ -f "${FSTAB}.before-ssd-delalloc-fix" ]; then
     echo "恢复原始 fstab..."
-    cp "${FSTAB}.orig" "$FSTAB"
-    rm -f "${FSTAB}.orig"
+    cp "${FSTAB}.before-ssd-delalloc-fix" "$FSTAB"
+    rm -f "${FSTAB}.before-ssd-delalloc-fix"
 else
-    echo "警告: 未找到原始 fstab 备份"
+    echo "警告: 未找到原始 fstab 备份 (${FSTAB}.before-ssd-delalloc-fix)"
 fi
 
 # 3. 删除 sysctl 配置
